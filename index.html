@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EMOM таймер</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="EMOM">
+<meta name="theme-color" content="#0B1A21">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B1A21;
+    --acid:#8CFF1A;
+    --prep:#2A4A63;
+    --alert:#F5C13D;
+    --light:#F0F4F3;
+    --dark:#06140A;
+    --display:"Oswald","Arial Narrow",Arial,sans-serif;
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){ --bg:#0B1A21; --light:#F0F4F3; }
+  }
+  :root[data-theme="dark"]{ --bg:#0B1A21; --light:#F0F4F3; }
+  html{height:100%;}
+  *,*::before,*::after{box-sizing:inherit;}
+  body{margin:0;height:100%;background:var(--bg);color:var(--light);
+       font-family:var(--display);-webkit-font-smoothing:antialiased;overscroll-behavior:none;}
+  button{font:inherit;cursor:pointer;}
+  :focus-visible{outline:3px solid var(--alert);outline-offset:2px;}
+
+  .app{position:relative;height:100%;overflow:hidden;}
+
+  /* два одинаковых слоя: светлый текст на тёмном фоне и тёмный — внутри заливки */
+  .layer{
+    --ink:var(--light); --muted:#7E969E; --line:rgba(240,244,243,.35);
+    --pip:rgba(240,244,243,.22); --btn-bg:var(--light); --btn-fg:var(--bg);
+    position:absolute;left:0;right:0;bottom:0;height:var(--app-h,100%);
+    display:flex;flex-direction:column;color:var(--ink);
+  }
+  .layer.ghost{
+    --ink:var(--dark); --muted:rgba(6,20,10,.62); --line:rgba(6,20,10,.45);
+    --pip:rgba(6,20,10,.25); --btn-bg:var(--dark); --btn-fg:var(--acid);
+    pointer-events:none;
+  }
+  .app.prep .layer.ghost{
+    --ink:var(--light); --muted:#A9BDC6; --line:rgba(240,244,243,.4);
+    --pip:rgba(240,244,243,.25); --btn-bg:var(--light); --btn-fg:var(--prep);
+  }
+  .app.alert .layer.ghost{
+    --ink:#1A1405; --muted:rgba(26,20,5,.6); --line:rgba(26,20,5,.45);
+    --pip:rgba(26,20,5,.28); --btn-bg:#1A1405; --btn-fg:var(--alert);
+  }
+
+  #fill{position:absolute;left:0;right:0;bottom:0;height:0;overflow:hidden;z-index:2;
+        pointer-events:none;background:var(--acid);
+        transition:height .12s linear,background-color .15s;}
+  .app.prep #fill{background:var(--prep);}
+  .app.alert #fill{background:var(--alert);height:100% !important;}
+  @media (prefers-reduced-motion:reduce){#fill{transition:none;}}
+
+  .top{display:flex;justify-content:space-between;align-items:baseline;padding:1.1rem 1.2rem 0;
+       font-size:1.35rem;font-weight:500;letter-spacing:.02em;}
+  .top em{font-style:normal;color:var(--muted);}
+  .total{color:var(--muted);font-weight:400;font-variant-numeric:tabular-nums;}
+
+  .core{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.6rem;}
+  .clock{margin:0;font-weight:500;font-variant-numeric:tabular-nums;
+         font-size:clamp(7rem,46vw,16rem);line-height:.82;letter-spacing:-.02em;}
+  .app.idle .clock,.app.done .clock{font-size:clamp(4.5rem,26vw,10rem);}
+
+  .stepper{display:none;align-items:center;gap:1.4rem;}
+  .app.idle .stepper{display:flex;}
+  .stepper button{width:4rem;height:4rem;border-radius:50%;border:1px solid var(--line);
+       background:transparent;color:var(--ink);font-size:2rem;font-weight:400;line-height:1;}
+  .stepper button:disabled{opacity:.25;cursor:default;}
+  .stepper span{min-width:6.5rem;text-align:center;font-size:1.15rem;color:var(--muted);letter-spacing:.03em;}
+
+  .pips{display:flex;gap:4px;padding:0 1.2rem .8rem;}
+  .pips i{flex:1;height:5px;border-radius:1px;background:var(--pip);}
+  .pips i.on{background:var(--ink);}
+
+  .ctrl{display:flex;gap:.7rem;padding:0 1.2rem 1.3rem;}
+  .ctrl button{min-height:4rem;border-radius:2px;font-size:1.3rem;font-weight:500;letter-spacing:.04em;}
+  .btn-main{flex:1;border:1px solid var(--btn-bg);background:var(--btn-bg);color:var(--btn-fg);}
+  .btn-reset{flex:0 0 30%;background:transparent;color:var(--ink);border:1px solid var(--line);}
+  .app.idle .btn-reset{visibility:hidden;}
+  .app.running .btn-main{background:transparent;color:var(--ink);border-color:var(--line);}
+</style>
+</head>
+<body>
+<div class="app idle" id="app">
+  <div class="layer" id="base">
+    <div class="top">
+      <span class="round" id="round">EMOM</span>
+      <span class="total" id="total"></span>
+    </div>
+    <div class="core">
+      <p class="clock" id="clock">10:00</p>
+      <div class="stepper">
+        <button id="minus" aria-label="Меньше минут">−</button>
+        <span id="mins">10 минут</span>
+        <button id="plus" aria-label="Больше минут">+</button>
+      </div>
+    </div>
+    <div class="pips" id="pips"></div>
+    <div class="ctrl">
+      <button class="btn-reset" id="reset">Сброс</button>
+      <button class="btn-main" id="main">Старт</button>
+    </div>
+  </div>
+  <div id="fill"><div class="layer ghost" id="ghost" aria-hidden="true"></div></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var ROUNDS=10, INT=60, PREP=5, TOTAL;
+  try{ var sv=parseInt(localStorage.getItem("emom-min"),10); if(sv>=1&&sv<=10) ROUNDS=sv; }catch(e){}
+
+  var $=function(i){return document.getElementById(i);};
+  var app=$("app"), base=$("base"), ghost=$("ghost"), fill=$("fill"),
+      clock=$("clock"), roundEl=$("round"), totalEl=$("total"), pips=$("pips"),
+      mainBtn=$("main"), resetBtn=$("reset"), minus=$("minus"), plus=$("plus"), minsEl=$("mins");
+
+  var state="idle", t0=0, pausedAt=0, lost=0, raf=0, last="", wake=null, ac=null;
+
+  /* тёмная копия интерфейса внутри заливки */
+  function sync(){ ghost.innerHTML=base.innerHTML.replace(/\sid="[^"]*"/g,""); }
+  function fit(){ app.style.setProperty("--app-h", app.clientHeight+"px"); }
+  window.addEventListener("resize",fit);
+  window.addEventListener("orientationchange",function(){ setTimeout(fit,200); });
+
+  function word(n){ var a=n%10,b=n%100;
+    if(a===1&&b!==11) return "минута";
+    if(a>=2&&a<=4&&(b<12||b>14)) return "минуты";
+    return "минут"; }
+  function setRounds(n){
+    ROUNDS=Math.min(10,Math.max(1,n)); TOTAL=PREP+ROUNDS*INT;
+    pips.innerHTML="";
+    for(var i=0;i<ROUNDS;i++) pips.appendChild(document.createElement("i"));
+    clock.textContent=ROUNDS+":00";
+    minsEl.textContent=ROUNDS+" "+word(ROUNDS);
+    minus.disabled=ROUNDS<=1; plus.disabled=ROUNDS>=10;
+    try{ localStorage.setItem("emom-min",String(ROUNDS)); }catch(e){}
+    sync();
+  }
+
+  function audioOn(){
+    try{ var C=window.AudioContext||window.webkitAudioContext; if(!C) return;
+      if(!ac) ac=new C(); if(ac.state==="suspended") ac.resume(); }catch(e){}
+  }
+  function beep(f,d,v){
+    try{ if(!ac) return; var o=ac.createOscillator(), g=ac.createGain();
+      o.type="square"; o.frequency.value=f;
+      g.gain.setValueAtTime(v||.16,ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+d);
+      o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+d+.02);
+    }catch(e){}
+  }
+  function buzz(p){ try{ if(navigator.vibrate) navigator.vibrate(p); }catch(e){} }
+  function awake(){
+    try{ if(navigator.wakeLock && !wake) navigator.wakeLock.request("screen")
+      .then(function(w){ wake=w; w.addEventListener("release",function(){wake=null;}); })
+      .catch(function(){}); }catch(e){}
+  }
+  function sleep(){ try{ if(wake){ wake.release(); wake=null; } }catch(e){} }
+  document.addEventListener("visibilitychange",function(){
+    if(document.visibilityState==="visible" && state==="running") awake();
+  });
+
+  function mmss(s){ s=Math.max(0,Math.ceil(s)); var m=Math.floor(s/60), r=s%60;
+    return m+":"+(r<10?"0":"")+r; }
+
+  function tick(now){
+    var el=(now-t0-lost)/1000;
+    if(el>=TOTAL){ finish(); return; }
+    var left, frac, prep=el<PREP, r=0;
+    if(prep){
+      left=PREP-el; frac=left/PREP;
+    }else{
+      var t=el-PREP; r=Math.floor(t/INT); left=INT-(t-r*INT); frac=left/INT;
+    }
+    fill.style.height=(frac*100).toFixed(2)+"%";
+
+    var w=Math.ceil(left), key=(prep?"p":"r"+r)+":"+w;
+    if(key!==last){
+      last=key;
+      app.classList.toggle("prep",prep);
+      app.classList.toggle("alert",w<=3);
+      clock.textContent=w;
+      if(prep){
+        roundEl.textContent="Приготовься"; totalEl.textContent="";
+      }else{
+        roundEl.innerHTML="Раунд "+(r+1)+" <em>/ "+ROUNDS+"</em>";
+        totalEl.textContent="осталось "+mmss(TOTAL-el);
+        for(var i=0;i<ROUNDS;i++) pips.children[i].classList.toggle("on",i<r);
+      }
+      sync();
+      if(w>=1 && w<=3){ beep(660,.09); buzz(60); }
+      if(!prep && w===INT){ beep(1046,.22,.22); buzz([120,60,120]); }
+    }
+    raf=requestAnimationFrame(tick);
+  }
+
+  function start(){
+    audioOn(); awake(); fit();
+    state="running"; app.className="app running";
+    t0=performance.now(); lost=0; pausedAt=0; last="";
+    mainBtn.textContent="Пауза";
+    sync();
+    raf=requestAnimationFrame(tick);
+  }
+  function pause(){
+    pausedAt=performance.now(); cancelAnimationFrame(raf); sleep();
+    state="paused"; app.classList.remove("running"); app.classList.add("paused");
+    mainBtn.textContent="Дальше"; sync();
+  }
+  function resume(){
+    lost+=performance.now()-pausedAt; pausedAt=0; awake();
+    state="running"; app.classList.remove("paused"); app.classList.add("running");
+    mainBtn.textContent="Пауза"; sync();
+    raf=requestAnimationFrame(tick);
+  }
+  function finish(){
+    cancelAnimationFrame(raf); sleep();
+    beep(880,.14); setTimeout(function(){beep(880,.14);},180); setTimeout(function(){beep(1320,.3);},380);
+    buzz([200,90,200,90,400]);
+    state="done"; app.className="app done";
+    for(var i=0;i<ROUNDS;i++) pips.children[i].classList.add("on");
+    fill.style.height="0%";
+    clock.textContent="Готово";
+    roundEl.innerHTML="EMOM <em>"+ROUNDS+" "+word(ROUNDS)+"</em>";
+    totalEl.textContent="";
+    mainBtn.textContent="Ещё раз"; sync();
+  }
+  function reset(){
+    cancelAnimationFrame(raf); sleep();
+    state="idle"; app.className="app idle";
+    fill.style.height="0%";
+    roundEl.textContent="EMOM"; totalEl.textContent="";
+    mainBtn.textContent="Старт";
+    setRounds(ROUNDS);
+  }
+
+  mainBtn.addEventListener("click",function(){
+    if(state==="idle"||state==="done") start();
+    else if(state==="running") pause();
+    else if(state==="paused") resume();
+  });
+  resetBtn.addEventListener("click",reset);
+  minus.addEventListener("click",function(){ setRounds(ROUNDS-1); });
+  plus.addEventListener("click",function(){ setRounds(ROUNDS+1); });
+
+  fit(); setRounds(ROUNDS);
+})();
+</script>
+<script>
+if("serviceWorker" in navigator){addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}
+</script>
+</body>
+</html>
