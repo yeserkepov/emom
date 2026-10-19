@@ -350,12 +350,26 @@
   });
 
   /* ---------- звук, вибрация, экран ---------- */
+  /* iOS: после голоса Web Audio уходит в "interrupted" и молчит —
+     в жесте пользователя пересоздаём контекст и проигрываем тихий буфер */
+  function wakeAudio(){
+    try{ if(ac && ac.state!=="running"){ var p=ac.resume(); if(p&&p.catch) p.catch(function(){}); } }catch(e){}
+  }
   function audioOn(){
-    try{ var C=window.AudioContext||window.webkitAudioContext; if(!C) return;
-      if(!ac) ac=new C(); if(ac.state==="suspended") ac.resume(); }catch(e){}
+    try{
+      var C=window.AudioContext||window.webkitAudioContext; if(!C) return;
+      if(ac && (ac.state==="closed"||ac.state==="interrupted")){ try{ ac.close(); }catch(e){} ac=null; }
+      if(!ac){
+        ac=new C();
+        ac.onstatechange=function(){ if(state==="running") wakeAudio(); };
+      }
+      wakeAudio();
+      var s=ac.createBufferSource(); s.buffer=ac.createBuffer(1,1,22050);
+      s.connect(ac.destination); s.start(0);
+    }catch(e){}
   }
   function beep(f,d,v){
-    try{ if(!ac) return; var o=ac.createOscillator(), g=ac.createGain();
+    try{ if(!ac) return; wakeAudio(); var o=ac.createOscillator(), g=ac.createGain();
       o.type="square"; o.frequency.value=f;
       g.gain.setValueAtTime(v||.16,ac.currentTime);
       g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+d);
@@ -394,7 +408,7 @@
   }
   function sleep(){ try{ if(wake){ wake.release(); wake=null; } }catch(e){} }
   document.addEventListener("visibilitychange",function(){
-    if(document.visibilityState==="visible" && state==="running") awake();
+    if(document.visibilityState==="visible" && state==="running"){ awake(); wakeAudio(); }
   });
 
   /* ---------- тренировка ---------- */
@@ -490,11 +504,12 @@
   }
 
   mainBtn.addEventListener("click",function(){
+    audioMode(); audioOn();
     if(state==="idle"||state==="done") start();
     else if(state==="running") pause();
     else if(state==="paused") resume();
   });
-  resetBtn.addEventListener("click",reset);
+  resetBtn.addEventListener("click",function(){ audioMode(); audioOn(); reset(); });
 
   fit(); render();
 })();
