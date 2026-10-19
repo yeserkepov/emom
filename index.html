@@ -102,6 +102,11 @@
   .srow.all .lbl{font-size:.95rem;letter-spacing:.04em;}
   .srow.all[hidden]{display:none;}
   #rows{display:flex;flex-direction:column;gap:.55rem;}
+  .sound{display:flex;justify-content:space-between;align-items:center;gap:1rem;
+         margin-top:.45rem;padding-top:.9rem;border-top:1px solid var(--line);}
+  .sound .lbl{color:var(--ink);font-size:1.2rem;}
+  .sound .seg{flex:0 1 15rem;}
+  .sound .seg button{font-size:1rem;letter-spacing:.03em;}
 
   .seg{display:flex;border:1px solid var(--line);border-radius:2px;overflow:hidden;}
   .seg button{flex:1;min-width:0;height:2.9rem;border:0;background:transparent;color:var(--ink);
@@ -165,6 +170,14 @@
         </div>
       </div>
       <div id="rows"></div>
+      <div class="sound">
+        <span class="lbl">Звук</span>
+        <div class="seg">
+          <button data-act="snd" data-v="voice" aria-pressed="false">Голос</button>
+          <button data-act="snd" data-v="beep" aria-pressed="false">Сигнал</button>
+          <button data-act="snd" data-v="off" aria-pressed="false">Выкл</button>
+        </div>
+      </div>
     </div>
 
     <div class="core">
@@ -184,7 +197,7 @@
 (function(){
   "use strict";
   var MAXN=5, PREP=5, WORKS=[30,60,90], PSTEP=5, PMAX=60, KEY="emom-cfg2";
-  var cfg={n:3, r:[]};
+  var cfg={n:3, r:[], sound:"voice"};
   for(var k=0;k<MAXN;k++) cfg.r.push({w:60,p:10});
   try{
     var s=JSON.parse(localStorage.getItem(KEY)||"null");
@@ -193,6 +206,7 @@
       if(ok) cfg=s;
     }
   }catch(e){}
+  if(["voice","beep","off"].indexOf(cfg.sound)<0) cfg.sound="voice";
 
   var $=function(i){return document.getElementById(i);};
   var app=$("app"), base=$("base"), ghost=$("ghost"), fill=$("fill"), setup=$("setup"),
@@ -282,12 +296,21 @@
     totalEl.textContent="всего "+mmss(sum);
     roundEl.textContent="EMOM";
     buildPips(list);
+    setup.querySelectorAll(".sound button").forEach(function(b){
+      b.setAttribute("aria-pressed", String(b.dataset.v===cfg.sound));
+    });
     try{ localStorage.setItem(KEY,JSON.stringify(cfg)); }catch(e){}
   }
 
   function act(btn){
     if(!btn || btn.disabled || state!=="idle") return;
     var a=btn.dataset.act, row=btn.closest(".srow"), idx=row?row.dataset.i:null, n=cfg.n, i;
+    if(a==="snd"){
+      cfg.sound=btn.dataset.v; render(); audioMode();
+      if(cfg.sound==="voice") say("Раунд один");
+      else if(cfg.sound==="beep"){ audioOn(); beep(1046,.22,.22); }
+      return;
+    }
     if(a==="n-"){ cfg.n=Math.max(1,n-1); }
     else if(a==="n+"){
       if(n<MAXN){ cfg.r[n]={w:cfg.r[n-1].w,p:cfg.r[n-1].p}; cfg.n=n+1; }
@@ -309,7 +332,7 @@
   function stopHold(){ clearTimeout(holdT); clearInterval(holdI); holdT=holdI=0; }
   setup.addEventListener("pointerdown",function(e){
     var btn=e.target.closest("button[data-act]");
-    if(!btn || btn.dataset.act==="w") return;
+    if(!btn || ["n-","n+","p-","p+"].indexOf(btn.dataset.act)<0) return;
     e.preventDefault();
     act(btn); stopHold();
     holdT=setTimeout(function(){
@@ -322,7 +345,8 @@
   setup.addEventListener("click",function(e){
     var btn=e.target.closest("button[data-act]");
     if(!btn) return;
-    if(btn.dataset.act==="w" || e.detail===0) act(btn);   /* сегменты и клавиатура */
+    var a=btn.dataset.act;
+    if(a==="w" || a==="snd" || e.detail===0) act(btn);   /* сегменты и клавиатура */
   });
 
   /* ---------- звук, вибрация, экран ---------- */
@@ -338,6 +362,30 @@
       o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+d+.02);
     }catch(e){}
   }
+  function tone(f,d,v){ if(cfg.sound==="beep") beep(f,d,v); }
+
+  /* голос: встроенный русский синтезатор iOS, работает офлайн */
+  var NUM=["один","два","три","четыре","пять"],
+      DUR={30:"тридцать секунд",60:"минута",90:"полторы минуты"},
+      synth=window.speechSynthesis||null, voice=null;
+  function pickVoice(){
+    try{ var ru=(synth.getVoices()||[]).filter(function(v){ return /^ru/i.test(v.lang); });
+      voice=ru.filter(function(v){ return /milena|милена/i.test(v.name); })[0]||ru[0]||null; }catch(e){}
+  }
+  if(synth){ pickVoice(); try{ synth.addEventListener("voiceschanged",pickVoice); }catch(e){} }
+  function say(t){
+    if(cfg.sound!=="voice" || !synth) return;
+    try{
+      if(synth.speaking||synth.pending) synth.cancel();
+      var u=new SpeechSynthesisUtterance(t);
+      u.lang="ru-RU"; if(voice) u.voice=voice; u.rate=1.1; u.volume=1;
+      synth.speak(u);
+    }catch(e){}
+  }
+  function hush(){ try{ if(synth) synth.cancel(); }catch(e){} }
+  /* звук идёт и в беззвучном режиме iPhone (Safari 16.4+) */
+  function audioMode(){ try{ if(navigator.audioSession) navigator.audioSession.type="playback"; }catch(e){} }
+
   function buzz(p){ try{ if(navigator.vibrate) navigator.vibrate(p); }catch(e){} }
   function awake(){
     try{ if(navigator.wakeLock && !wake) navigator.wakeLock.request("screen")
@@ -351,8 +399,13 @@
 
   /* ---------- тренировка ---------- */
   function onPhase(p){
-    if(p.t==="work"){ beep(1046,.22,.22); buzz([120,60,120]); }
-    else if(p.t==="rest"){ beep(523,.3,.2); buzz(250); }
+    if(p.t==="work"){
+      tone(1046,.22,.22); buzz([120,60,120]);
+      say(cfg.n>1 && p.i===cfg.n-1 ? "Последний раунд" : "Раунд "+NUM[p.i]);
+    }else if(p.t==="rest"){
+      tone(523,.3,.2); buzz(250);
+      say(p.d>=10 ? "Отдых. Дальше "+DUR[cfg.r[p.i+1].w] : "Отдых");
+    }
   }
   function caption(p){
     var n=cfg.n;
@@ -390,13 +443,14 @@
       }
       totalEl.textContent=p.t==="prep"?"":"осталось "+mmss(TOTAL-el);
       sync();
-      if(w>=1 && w<=3){ beep(660,.09); buzz(60); }
+      if(w>=1 && w<=3){ tone(660,.09); say(["один","два","три"][w-1]); buzz(60); }
     }
     raf=requestAnimationFrame(tick);
   }
 
   function start(){
-    audioOn(); awake(); fit(); stopHold();
+    audioMode(); audioOn(); awake(); fit(); stopHold();
+    say("Приготовься");
     PH=phases(); TOTAL=PH[PH.length-1].end; buildPips(PH);
     state="running"; app.className="app running";
     t0=performance.now(); lost=0; pausedAt=0; last=""; cur=-1;
@@ -404,7 +458,7 @@
     raf=requestAnimationFrame(tick);
   }
   function pause(){
-    pausedAt=performance.now(); cancelAnimationFrame(raf); sleep();
+    pausedAt=performance.now(); cancelAnimationFrame(raf); sleep(); hush();
     state="paused"; app.classList.remove("running"); app.classList.add("paused");
     mainBtn.textContent="Дальше"; sync();
   }
@@ -416,7 +470,8 @@
   }
   function finish(){
     cancelAnimationFrame(raf); sleep();
-    beep(880,.14); setTimeout(function(){beep(880,.14);},180); setTimeout(function(){beep(1320,.3);},380);
+    tone(880,.14); setTimeout(function(){tone(880,.14);},180); setTimeout(function(){tone(1320,.3);},380);
+    say("Готово");
     buzz([200,90,200,90,400]);
     state="done"; app.className="app done";
     for(var j=0;j<pips.children.length;j++){ pips.children[j].classList.add("on"); pips.children[j].classList.remove("cur"); }
@@ -427,7 +482,7 @@
     mainBtn.textContent="Ещё раз"; sync();
   }
   function reset(){
-    cancelAnimationFrame(raf); sleep();
+    cancelAnimationFrame(raf); sleep(); hush();
     state="idle"; app.className="app idle";
     fill.style.height="0%"; clock.textContent=""; cap.textContent="";
     mainBtn.textContent="Старт";
